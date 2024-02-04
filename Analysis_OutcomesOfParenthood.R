@@ -1,3 +1,6 @@
+# Project Name: Outcomes of Parenthood
+# Author: Bruno Alves de Carvalho
+# Status: ongoing
 
 # Setting the directory to the data warehouse
 setwd("/Users/brunoalvesdecarvalho/Desktop/DataWarehouse_20231015_ve01")
