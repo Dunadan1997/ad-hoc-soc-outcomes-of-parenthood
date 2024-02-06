@@ -2,7 +2,10 @@
 # Author: Bruno Alves de Carvalho
 # Status: ongoing
 
-# Setting the directory to the data warehouse
+
+# Set up ------------------------------------------------------------------
+
+# Set the directory
 setwd("/Users/brunoalvesdecarvalho/Desktop/DataWarehouse_20231015_ve01")
 
 # Loading packages
@@ -10,14 +13,21 @@ library(tidyverse)
 library(memoise)
 library(haven)
 
-# Loading functions from the warehouse
+# Load functions
 source("R_Scripts/FunctionRepository_20231016_ve01.R")
 
-# Loading data stored in the warehouse
+# Load color palette
+source("R_Scripts/ColorPalette_20240128_ve01.R")
+
+# Load data
 aggregated_data_shp <- 
   readRDS("SHP/Data_Aggregated_1999_2022/cached_data_shp.rds")
 
-# Selecting variables necessary for analysis
+
+
+# Collect data ------------------------------------------------------------
+
+# Select variables necessary for analysis
 selected_vars_shp <- 
   rep(
     list(
@@ -75,10 +85,14 @@ selected_vars_shp <-
 merged_data_shp <-
   shp_merge_data(aggregated_data_shp, selected_vars_shp)
 
-# Transform data
+
+# Transform data ----------------------------------------------------------
+
+# Remove symbols from field names
 colnames(merged_data_shp)[str_detect(colnames(merged_data_shp), "\\$$")] <-
   str_replace_all(colnames(merged_data_shp)[str_detect(colnames(merged_data_shp), "\\$$")], "\\$\\$", "")
 
+# Create factors and other categorical data
 merged_data_shp$sex_fct <- 
   factor(merged_data_shp$sex, levels = c(1,2,3), labels = c("man", "woman", "other"))
 
@@ -111,7 +125,7 @@ merged_data_shp$langregion <-
                "Italian-Speaking Cantons" = c("Ticino"), 
                "Bilingual Cantons" = c("Fribourg", "Valais", "Grisons"))
 
-# Create table
+# Create new data-set and rename remaining field names
 tab_family <- 
   merged_data_shp %>% 
   rename(
@@ -126,10 +140,12 @@ tab_family <-
   select(-matches("\\$"))
 
 # Correct data errors
-tab_family[which(tab_family$idpers == 63186101 & tab_family$sex == 2),"sex_fct"] <- "man"
-tab_family[which(tab_family$idpers == 63186102 & tab_family$age == 24), c("ownkid")] <- 1
+tab_family[which(tab_family$idpers == 63186101 & tab_family$sex == 2),"sex_fct"] <- 
+  "man"
+tab_family[which(tab_family$idpers == 63186102 & tab_family$age == 24), c("ownkid")] <- 
+  1
 
-# Modify table
+# Modify table and create variables to enable analysis
 tab_family <- 
   tab_family %>% 
   # Filter for individuals with at least 3 yrs of observation
@@ -165,60 +181,12 @@ tab_family <-
 
 # Exploratory Data Analysis -----------------------------------------------
 
-# plot age distribution over parents and non-parents (would and won't be), by sex
-tab_family %>% 
-  ggplot() + 
-  geom_histogram(aes(x = age)) + 
-  facet_wrap(~ parent + parenthood)
+# plot age distribution of parents and non-parents, by sex
 tab_family %>% 
   filter(sex_fct != "other") %>% 
   ggplot() + 
   geom_histogram(aes(x = age)) + 
-  facet_wrap(~ parent + sex_fct)
-
-# Determine upper age limit for having children
-avg_age_first_child <- 
-  mean(subset(tab_family, first_child == 1)$age) 
-sd_age_first_child <- 
-  sd(subset(tab_family, first_child == 1)$age)
-upper_age_limit <- 
-  avg_age_first_child + (2 * sd_age_first_child)
-
-# plot age distribution of non-parents who "most likely" will never be parents
-tab_nonparents <- 
-  left_join(
-  x = tab_family %>% 
-    # Filter individuals who have crossed the upper age limit of having children
-    mutate(flag_1 = ifelse(parent == "non_parent" & age > upper_age_limit, 1, 0)) %>% 
-    filter(flag_1 == 1) %>% 
-    select(idpers) %>% 
-    distinct(), 
-  y = tab_family, 
-  relationship = "one-to-many")
-tab_nonparents %>% 
-  ggplot() + 
-  geom_histogram(aes(age))
-
-# plot age distribution of parents
-tab_family %>% 
-  filter(parent == "parent" & age > 16) %>% 
-  ggplot() + 
-  geom_histogram(aes(x = age))
-
-# plot life satisfaction over age, by parent and non-parent
-bind_rows(
-  x = tab_family %>% 
-    filter(parent == "parent" & age > 16), 
-  y = tab_nonparents) %>% 
-  mutate(depvar_lifesat = ifelse(depvar_lifesat < 0, NA, depvar_lifesat)) %>% 
-  group_by(parent, age) %>% 
-  summarise(n = n(), mean_lifesat = mean(depvar_lifesat, na.rm = TRUE)) %>% 
-  ggplot(aes(x = age, y = mean_lifesat, color = parent)) + 
-  geom_vline(xintercept = avg_age_first_child) + 
-  geom_point() + 
-  geom_smooth() + 
-  scale_x_continuous(limits = c(26, 85)) + 
-  scale_y_continuous(limits = c(7, 9))
+  facet_wrap(~ parenthood + sex_fct)
 
 # plot age distribution of mother and father when they have their first child
 tab_family %>% 
@@ -227,6 +195,41 @@ tab_family %>%
   geom_histogram(aes(x = age)) +
   facet_wrap(~ sex_fct)
 
+# Determine average age and upper-age-limit for having first child
+avg_age_first_child <- 
+  mean(subset(tab_family, first_child == 1)$age) 
+sd_age_first_child <- 
+  sd(subset(tab_family, first_child == 1)$age)
+upper_age_limit <- 
+  avg_age_first_child + (2 * sd_age_first_child)
+
+# plot life satisfaction over age between parents and non-parents, by sex
+tab_family %>% 
+  filter(age > 16) %>% 
+  mutate(depvar_lifesat = ifelse(depvar_lifesat < 0, NA, depvar_lifesat)) %>% 
+  group_by(parent, age) %>% 
+  summarise(n = n(), mean_lifesat = mean(depvar_lifesat, na.rm = TRUE)) %>% 
+  ggplot(aes(x = age, y = mean_lifesat, color = parent)) + 
+  geom_point() + 
+  geom_smooth() + 
+  scale_x_continuous(limits = c(16, 85)) + 
+  scale_y_continuous(limits = c(7, 9))
+
+# plot of happiness with partner over age comparing non-parents against parents
+tab_family %>% 
+  mutate(depvar_hpyprtnr = ifelse(depvar_hpyprtnr < 0, NA, depvar_hpyprtnr)) %>% 
+  group_by(age, parent) %>% 
+  summarise(
+    n = n(), 
+    mean_hpyprtnr = mean(depvar_hpyprtnr, na.rm = T), 
+    n_non_missing_hpyprtnr = sum(!is.na(depvar_hpyprtnr))
+  ) %>% 
+  ggplot(aes(x = age, y = mean_hpyprtnr, color = parent)) + 
+  geom_point() + 
+  geom_smooth(span = 0.75) +
+  scale_y_continuous(limits = c(7.5, 10)) +
+  scale_x_continuous(limits = c(16, 85))
+
 # plot life satisfaction over years before and since first child
 tab_family %>% 
   mutate(depvar_lifesat = ifelse(depvar_lifesat < 0, NA, depvar_lifesat)) %>% 
@@ -234,13 +237,68 @@ tab_family %>%
   summarise(
     n = n(), 
     mean_lifesat = mean(depvar_lifesat, na.rm = T),
-    n_non_missing_lifesat = sum(!is.na(depvar_lifesat))) %>% 
+    n_non_missing_lifesat = sum(!is.na(depvar_lifesat))
+    ) %>% 
   ggplot(aes(x = years_since_first_child, y = mean_lifesat, color = sex_fct)) + 
   geom_vline(xintercept = 0, linewidth = 0.5) + 
   geom_point() + 
   geom_smooth(se = F) +
   scale_y_continuous(limits = c(7, 9)) + 
-  scale_x_continuous(limits = c(-10, 10)) 
+  scale_x_continuous(limits = c(-9, 9)) 
+
+# plot happiness with partner over years before and since first child
+tab_family %>% 
+  filter(sex_fct != "other") %>% 
+  mutate(depvar_hpyprtnr = ifelse(depvar_hpyprtnr < 0, NA, depvar_hpyprtnr)) %>% 
+  group_by(years_since_first_child, sex_fct) %>% 
+  summarise(
+    n = n(), 
+    mean_hpyprtnr = mean(depvar_hpyprtnr, na.rm = T), 
+    n_non_missing_hpyprtnr = sum(!is.na(depvar_hpyprtnr))) %>% 
+  ggplot(aes(x = years_since_first_child, y = mean_hpyprtnr, color = sex_fct)) + 
+  geom_vline(xintercept = 0, linewidth = 0.5) + 
+  geom_point() + 
+  geom_smooth(se = F) +
+  scale_y_continuous(limits = c(7.5, 10)) + 
+  scale_x_continuous(limits = c(-5, 9))  
+
+
+# Archive -----------------------------------------------------------------
+
+# plot age distribution of non-parents who "most likely" will never be parents
+tab_nonparents <- 
+  left_join(
+    x = tab_family %>% 
+      # Filter individuals who have crossed the upper age limit of having children
+      mutate(flag_1 = ifelse(parent == "non_parent" & age > upper_age_limit, 1, 0)) %>% 
+      filter(flag_1 == 1) %>% 
+      select(idpers) %>% 
+      distinct(), 
+    y = tab_family, 
+    relationship = "one-to-many")
+tab_nonparents %>% 
+  ggplot() + 
+  geom_histogram(aes(age))
+
+# plot happiness with partner over age for parents having their first child at 32 (compare with non-parents)
+left_join(
+  x = tab_family %>% 
+    filter(first_child == 1 & age == 32) %>% 
+    distinct(idpers), y = tab_family, 
+  relationship = "one-to-many") %>% 
+  bind_rows(tab_family %>% filter(parent == "non_parent")) %>% 
+  mutate(depvar_hpyprtnr = ifelse(depvar_hpyprtnr < 0, NA, depvar_hpyprtnr)) %>% 
+  group_by(age, sex_fct, parent) %>% 
+  summarise(
+    n = n(), 
+    mean_hpyprtnr = mean(depvar_hpyprtnr, na.rm = T), 
+    n_non_missing_hpyprtnr = sum(!is.na(depvar_hpyprtnr))) %>% 
+  ggplot(aes(x = age, y = mean_hpyprtnr, color = sex_fct)) + 
+  geom_vline(xintercept = 32, linewidth = 0.5) + 
+  geom_point() + 
+  geom_smooth(se = F) +
+  facet_wrap(~ parent) +
+  scale_y_continuous(limits = c(7.5, 10)) + scale_x_continuous(limits = c(30, 35))
 
 # plot frequency of joy over years before and since first child
 tab_family %>% 
@@ -272,7 +330,7 @@ tab_family %>%
   scale_y_continuous(limits = c(2, 6)) + 
   scale_x_continuous(limits = c(-10, 10))   
 
-# plot frequency of saddness over years before and since first child
+# plot frequency of sadness over years before and since first child
 tab_family %>% 
   mutate(depvar_freqsad = ifelse(depvar_freqsad < 0, NA, depvar_freqsad)) %>% 
   group_by(years_since_first_child, sex_fct) %>% 
@@ -300,23 +358,5 @@ tab_family %>%
   geom_point() + 
   geom_smooth(se = F) +
   scale_y_continuous(limits = c(1.5, 4)) + 
-  scale_x_continuous(limits = c(-10, 10))  
-
-# plot happiness with partner over years before and since first child
-tab_family %>% 
-  mutate(depvar_hpyprtnr = ifelse(depvar_hpyprtnr < 0, NA, depvar_hpyprtnr)) %>% 
-  group_by(years_since_first_child, sex_fct) %>% 
-  summarise(
-    n = n(), 
-    mean_hpyprtnr = mean(depvar_hpyprtnr, na.rm = T), 
-    n_non_missing_hpyprtnr = sum(!is.na(depvar_hpyprtnr))) %>% 
-  ggplot(aes(x = years_since_first_child, y = mean_hpyprtnr, color = sex_fct)) + 
-  geom_vline(xintercept = 0, linewidth = 0.5) + 
-  geom_point() + 
-  geom_smooth(se = F) +
-  scale_y_continuous(limits = c(7.5, 10)) + 
-  scale_x_continuous(limits = c(-5, 9))  
-
-
-
+  scale_x_continuous(limits = c(-10, 10))
 
