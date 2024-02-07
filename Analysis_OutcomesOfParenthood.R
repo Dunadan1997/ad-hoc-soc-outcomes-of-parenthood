@@ -62,12 +62,20 @@ selected_vars_shp <-
         # other
         "p$$c06", # sleeping problems, last 12 months, binary yes / no
         "p$$c06a", # sleeping problems, last 4 weeks, scale 1 to 3
+        "p$$f04", # satisfaction with way housework is shared, scale 0 to 10 (completely satisfied)
+        "p$$n04", # practical support from partner, scale 0 to 10 (a great deal)
+        "p$$n14", # practical support from relatives
+        "p$$n21", # practical support from neighbors
+        "p$$n28", # practical support from close friends
+        "p$$n32", # practical support from colleagues
+        "h$$f53", # child care in case of illness (10 categories)
         
         # independent variable
         "ownkid$$", # number of children born
         "nbb_$$", # new baby, binary yes / no
         "nbkid$$", # number of children in household (0 to 17 years old)
         "nbpers$$", # number of persons in household
+        "p$$f50", # interference of work in family obligations, scale 0 to 10 (very strongly)
         
         # dependent variable
         "p$$f54", # Happy with the partner, scale 0 to 10 (very happy)
@@ -75,7 +83,9 @@ selected_vars_shp <-
         "p$$c47", # frequency of moments of joy, scale 0 to 10 (always)
         "p$$c48", # frequency of moments of anger
         "p$$c49", # frequency of moments of sadness
-        "p$$c50" # frequency of moments of worry
+        "p$$c50", # frequency of moments of worry
+        "p$$c18", # frequency of energy and optimism
+        "h$$h01"# improvement or deterioration of standard of living, scale 0 to 10 (greatly improved)
       )
     ),
     length(1999:2022)
@@ -203,7 +213,7 @@ sd_age_first_child <-
 upper_age_limit <- 
   avg_age_first_child + (2 * sd_age_first_child)
 
-# plot life satisfaction over age between parents and non-parents, by sex
+# plot life satisfaction over age between parents and non-parents
 tab_family %>% 
   filter(age > 16) %>% 
   mutate(depvar_lifesat = ifelse(depvar_lifesat < 0, NA, depvar_lifesat)) %>% 
