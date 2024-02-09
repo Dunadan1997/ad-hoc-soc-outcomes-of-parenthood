@@ -135,6 +135,8 @@ merged_data_shp$langregion <-
                "Italian-Speaking Cantons" = c("Ticino"), 
                "Bilingual Cantons" = c("Fribourg", "Valais", "Grisons"))
 
+
+
 # Create new data-set and rename remaining field names
 tab_family <- 
   merged_data_shp %>% 
