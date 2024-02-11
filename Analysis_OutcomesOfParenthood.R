@@ -69,13 +69,13 @@ selected_vars_shp <-
         "p$$n28", # practical support from close friends
         "p$$n32", # practical support from colleagues
         "h$$f53", # child care in case of illness (10 categories)
+        "p$$f50", # interference of work in family obligations, scale 0 to 10 (very strongly)
         
         # independent variable
         "ownkid$$", # number of children born
         "nbb_$$", # new baby, binary yes / no
         "nbkid$$", # number of children in household (0 to 17 years old)
         "nbpers$$", # number of persons in household
-        "p$$f50", # interference of work in family obligations, scale 0 to 10 (very strongly)
         
         # dependent variable
         "p$$f54", # Happy with the partner, scale 0 to 10 (very happy)
@@ -135,24 +135,95 @@ merged_data_shp$langregion <-
                "Italian-Speaking Cantons" = c("Ticino"), 
                "Bilingual Cantons" = c("Fribourg", "Valais", "Grisons"))
 
+transform_scales <- function(field) {
+  ifelse(field < 0, NA, field)
+}
 
-
-# Create new data-set and rename remaining field names
-tab_family <- 
+tab_family <-
   merged_data_shp %>% 
+  mutate(
+    sleep_problems = 
+      ifelse(
+        `p$$c06` == 1 & year %in% c(1999:2004), 1, 
+        ifelse(
+          `p$$c06` == 2 & year %in% c(1999:2004), 0, 
+          ifelse(
+            `p$$c06` < 1 & year %in% c(1999:2004), NA, 
+            ifelse(
+              `p$$c06a` > 1, 1, 
+              ifelse(
+                `p$$c06a` == 1, 0, NA)
+              )
+            )
+          )
+        ) %>% 
+      factor(levels = c(0,1), labels = c("no", "yes")),
+    marriage =
+      ifelse(
+        civsta == 2, 1, 
+        ifelse(
+          civsta < 1, NA, 0
+          )
+        ) %>% 
+      factor(levels = c(0,1), labels = c("not_married", "married")),
+    separation = 
+      ifelse(
+        civsta %in% c(3,4,7), 1, 
+        ifelse(
+          civsta < 1, NA, 0
+          )
+        ) %>% 
+      factor(levels = c(0,1), labels = c("not_separated", "separated")),
+    income_level = 
+      ifelse(
+        iptotni > median(iptotni, na.rm = TRUE), "above", "below"
+      ) %>% 
+      as.factor(),
+    partner_support = 
+      ifelse(`p$$n04` < 0, NA, `p$$n04`) %>% 
+      as_factor() %>% 
+      fct_collapse(
+        low = c(0,1,2,3,4,5,6), 
+        moderate = c(7,8), 
+        high = c(9,10)),
+    relatives_support = 
+      ifelse(`p$$n14` < 0, NA, `p$$n14`) %>% 
+      as_factor() %>% 
+      fct_collapse(
+        low = c(0,1,2,3,4), 
+        moderate = c(5,6,7), 
+        high = c(8,9,10)),
+    housework_satisfaction =  
+      ifelse(`p$$f04` < 0, NA, `p$$f04`) %>% 
+      as_factor() %>% 
+      fct_collapse(
+        low = c(0,1,2,3,4,5,6), 
+        moderate = c(7,8), 
+        high = c(9,10)), 
+    across(
+      c(
+        "p$$f54",
+        "p$$c44",
+        "edyear"
+        ),
+      transform_scales
+      )
+    ) %>% 
   rename(
     nbb = nbb_,
     commune_type = com2_, 
-    depvar_hpyprtnr = `p$$f54`, 
-    depvar_lifesat = `p$$c44`, 
-    depvar_freqjoy = `p$$c47`, 
-    depvar_freqanger = `p$$c48`, 
-    depvar_freqsad = `p$$c49`, 
-    depvar_freqworry = `p$$c50`) %>% 
-  select(-matches("\\$"))
+    hpyprtnr_depvar = `p$$f54`, 
+    lifesat_depvar = `p$$c44`
+    ) %>% 
+  select(
+    -matches("\\$"), 
+    -starts_with("edu"), 
+    -ends_with("i"), 
+    -all_of(c("generation", "canton", "civsta", "sex"))
+    )
 
 # Correct data errors
-tab_family[which(tab_family$idpers == 63186101 & tab_family$sex == 2),"sex_fct"] <- 
+tab_family[which(tab_family$idpers == 63186101 & tab_family$sex_fct == "woman"),"sex_fct"] <- 
   "man"
 tab_family[which(tab_family$idpers == 63186102 & tab_family$age == 24), c("ownkid")] <- 
   1
@@ -169,29 +240,61 @@ tab_family <-
   group_by(idpers) %>% 
   # Push the last number of kids forward if value is missing
   fill(ownkid_new, .direction = "down") %>% 
+  ungroup() %>% 
   # Filter for the remaining missing values in number of children
   filter(!is.na(ownkid_new)) %>% 
   # Flag moment when the individual has their first child
+  group_by(idpers) %>% 
   mutate(
     row_id = row_number(),
     cumsum = cumsum(ownkid_new), 
     first_child = ifelse(cumsum == 1 & nbb == 1, 1, 0),
     # Flag period when the individual is a parent
-    parenthood = ifelse(cumsum > 0, 1, 0),
+    parenthood = ifelse(cumsum > 0, 1, 0) %>% factor(levels = c(0,1), labels = c("no_children", "has_children")),
     # Identify year of first child
     year_of_first_child = ifelse(first_child == 1, year, NA)
   ) %>% 
   fill(year_of_first_child, .direction = "updown") %>% 
   # Identify number of years since and before first child
   mutate(years_since_first_child = year - year_of_first_child) %>% 
+  ungroup() %>% 
   # Identify if the individual is a parent or non-parent
   left_join(
     tab_family %>% group_by(idpers) %>% summarise(sum_nbkids = sum(ifelse(ownkid < 0, 0, ownkid), na.rm = T)), relationship = "many-to-one") %>% 
   mutate(parent = ifelse(sum_nbkids > 0, "parent", "non_parent")) %>% 
-  ungroup()
+  select(
+    -starts_with("nb"),
+    -cumsum,
+    -sum_nbkids,
+    -ownkid,
+    -row_id,
+    -year_of_first_child,
+    -parent,
+    -n
+    ) %>% 
+  select(
+    idpers, idhous, 
+    year, age, 
+    sex_fct, edyear, income_level, polideology,
+    langregion, commune_type, 
+    marriage, separation, 
+    parenthood, first_child, years_since_first_child, ownkid_new,
+    ends_with("support"), sleep_problems, housework_satisfaction,
+    ends_with("depvar")
+    )
 
 
 # Exploratory Data Analysis -----------------------------------------------
+
+# summary statistics
+arsenal::tableby(
+  ~ partner_support + relatives_support + housework_satisfaction, 
+  data = tab_family, 
+  control = 
+    arsenal::tableby.control(
+      total = T, 
+      numeric.stats = c("Nmiss", "meansd", "range", "medianq1q3"))) %>% 
+  summary()
 
 # plot age distribution of parents and non-parents, by sex
 tab_family %>% 
@@ -218,38 +321,85 @@ upper_age_limit <-
 # plot life satisfaction over age between parents and non-parents
 tab_family %>% 
   filter(age > 16) %>% 
-  mutate(depvar_lifesat = ifelse(depvar_lifesat < 0, NA, depvar_lifesat)) %>% 
-  group_by(parent, age) %>% 
-  summarise(n = n(), mean_lifesat = mean(depvar_lifesat, na.rm = TRUE)) %>% 
-  ggplot(aes(x = age, y = mean_lifesat, color = parent)) + 
+  mutate(lifesat_depvar = ifelse(lifesat_depvar < 0, NA, lifesat_depvar)) %>% 
+  group_by(parenthood, age) %>% 
+  summarise(n = n(), mean_lifesat = mean(lifesat_depvar, na.rm = TRUE)) %>% 
+  ggplot(aes(x = age, y = mean_lifesat, color = parenthood)) + 
   geom_point() + 
   geom_smooth() + 
-  scale_x_continuous(limits = c(16, 85)) + 
+  scale_x_continuous(
+    limits = c(16, 85),
+    breaks = seq(15, 85, by = 5)) + 
   scale_y_continuous(limits = c(7, 9))
 
-# plot of happiness with partner over age comparing non-parents against parents
+# plot of happiness with partner over age, by parenthood
 tab_family %>% 
-  mutate(depvar_hpyprtnr = ifelse(depvar_hpyprtnr < 0, NA, depvar_hpyprtnr)) %>% 
-  group_by(age, parent) %>% 
+  mutate(hpyprtnr_depvar = ifelse(hpyprtnr_depvar < 0, NA, hpyprtnr_depvar)) %>% 
+  group_by(parenthood, age) %>% 
   summarise(
     n = n(), 
-    mean_hpyprtnr = mean(depvar_hpyprtnr, na.rm = T), 
-    n_non_missing_hpyprtnr = sum(!is.na(depvar_hpyprtnr))
+    mean_hpyprtnr = mean(hpyprtnr_depvar, na.rm = T), 
+    n_non_missing_hpyprtnr = sum(!is.na(hpyprtnr_depvar))
   ) %>% 
-  ggplot(aes(x = age, y = mean_hpyprtnr, color = parent)) + 
+  ggplot(aes(x = age, y = mean_hpyprtnr, color = parenthood)) + 
   geom_point() + 
   geom_smooth(span = 0.75) +
   scale_y_continuous(limits = c(7.5, 10)) +
-  scale_x_continuous(limits = c(16, 85))
+  scale_x_continuous(limits = c(25, 85))
+
+# plot of happiness with partner over age, by parenthood and sleep problems
+tab_family %>% 
+  mutate(hpyprtnr_depvar = ifelse(hpyprtnr_depvar < 0, NA, hpyprtnr_depvar)) %>% 
+  group_by(parenthood, sleep_problems, age) %>% 
+  summarise(
+    n = n(), 
+    mean_hpyprtnr = mean(hpyprtnr_depvar, na.rm = T), 
+    n_non_missing_hpyprtnr = sum(!is.na(hpyprtnr_depvar))
+  ) %>% filter(!is.na(sleep_problems)) %>% 
+  ggplot(aes(x = age, y = mean_hpyprtnr, color = parenthood)) + 
+  geom_point() + 
+  geom_smooth(span = 0.75) + facet_wrap(~ sleep_problems) +
+  scale_y_continuous(limits = c(7.5, 10)) +
+  scale_x_continuous(limits = c(25, 85))
+
+# plot of happiness with partner over age, by parenthood and housework
+tab_family %>% 
+  group_by(parenthood, housework_satisfaction, age) %>% 
+  summarise(
+    n = n(), 
+    mean_hpyprtnr = mean(hpyprtnr_depvar, na.rm = T), 
+    n_non_missing_hpyprtnr = sum(!is.na(hpyprtnr_depvar))
+  ) %>% 
+  filter(!is.na(housework_satisfaction)) %>% 
+  ggplot(aes(x = age, y = mean_hpyprtnr, color = parenthood)) + 
+  geom_point() + 
+  geom_smooth(span = 0.75, se = F) + facet_wrap(~ housework_satisfaction) +
+  scale_y_continuous(limits = c(5, 10)) +
+  scale_x_continuous(limits = c(25, 80))
+
+# plot of happiness with partner over age, by parenthood and partner support
+tab_family %>% 
+  group_by(parenthood, partner_support, age) %>% 
+  summarise(
+    n = n(), 
+    mean_hpyprtnr = mean(hpyprtnr_depvar, na.rm = T), 
+    n_non_missing_hpyprtnr = sum(!is.na(hpyprtnr_depvar))
+  ) %>% 
+  filter(!is.na(partner_support)) %>% 
+  ggplot(aes(x = age, y = mean_hpyprtnr, color = parenthood)) + 
+  geom_point() + 
+  geom_smooth(span = 0.75, se = F) + facet_wrap(~ partner_support) +
+  scale_y_continuous(limits = c(5, 10)) +
+  scale_x_continuous(limits = c(25, 80))
 
 # plot life satisfaction over years before and since first child
 tab_family %>% 
-  mutate(depvar_lifesat = ifelse(depvar_lifesat < 0, NA, depvar_lifesat)) %>% 
+  mutate(lifesat_depvar = ifelse(lifesat_depvar < 0, NA, lifesat_depvar)) %>% 
   group_by(years_since_first_child, sex_fct) %>% 
   summarise(
     n = n(), 
-    mean_lifesat = mean(depvar_lifesat, na.rm = T),
-    n_non_missing_lifesat = sum(!is.na(depvar_lifesat))
+    mean_lifesat = mean(lifesat_depvar, na.rm = T),
+    n_non_missing_lifesat = sum(!is.na(lifesat_depvar))
     ) %>% 
   ggplot(aes(x = years_since_first_child, y = mean_lifesat, color = sex_fct)) + 
   geom_vline(xintercept = 0, linewidth = 0.5) + 
@@ -261,12 +411,12 @@ tab_family %>%
 # plot happiness with partner over years before and since first child
 tab_family %>% 
   filter(sex_fct != "other") %>% 
-  mutate(depvar_hpyprtnr = ifelse(depvar_hpyprtnr < 0, NA, depvar_hpyprtnr)) %>% 
+  mutate(hpyprtnr_depvar = ifelse(hpyprtnr_depvar < 0, NA, hpyprtnr_depvar)) %>% 
   group_by(years_since_first_child, sex_fct) %>% 
   summarise(
     n = n(), 
-    mean_hpyprtnr = mean(depvar_hpyprtnr, na.rm = T), 
-    n_non_missing_hpyprtnr = sum(!is.na(depvar_hpyprtnr))) %>% 
+    mean_hpyprtnr = mean(hpyprtnr_depvar, na.rm = T), 
+    n_non_missing_hpyprtnr = sum(!is.na(hpyprtnr_depvar))) %>% 
   ggplot(aes(x = years_since_first_child, y = mean_hpyprtnr, color = sex_fct)) + 
   geom_vline(xintercept = 0, linewidth = 0.5) + 
   geom_point() + 
@@ -276,99 +426,4 @@ tab_family %>%
 
 
 # Archive -----------------------------------------------------------------
-
-# plot age distribution of non-parents who "most likely" will never be parents
-tab_nonparents <- 
-  left_join(
-    x = tab_family %>% 
-      # Filter individuals who have crossed the upper age limit of having children
-      mutate(flag_1 = ifelse(parent == "non_parent" & age > upper_age_limit, 1, 0)) %>% 
-      filter(flag_1 == 1) %>% 
-      select(idpers) %>% 
-      distinct(), 
-    y = tab_family, 
-    relationship = "one-to-many")
-tab_nonparents %>% 
-  ggplot() + 
-  geom_histogram(aes(age))
-
-# plot happiness with partner over age for parents having their first child at 32 (compare with non-parents)
-left_join(
-  x = tab_family %>% 
-    filter(first_child == 1 & age == 32) %>% 
-    distinct(idpers), y = tab_family, 
-  relationship = "one-to-many") %>% 
-  bind_rows(tab_family %>% filter(parent == "non_parent")) %>% 
-  mutate(depvar_hpyprtnr = ifelse(depvar_hpyprtnr < 0, NA, depvar_hpyprtnr)) %>% 
-  group_by(age, sex_fct, parent) %>% 
-  summarise(
-    n = n(), 
-    mean_hpyprtnr = mean(depvar_hpyprtnr, na.rm = T), 
-    n_non_missing_hpyprtnr = sum(!is.na(depvar_hpyprtnr))) %>% 
-  ggplot(aes(x = age, y = mean_hpyprtnr, color = sex_fct)) + 
-  geom_vline(xintercept = 32, linewidth = 0.5) + 
-  geom_point() + 
-  geom_smooth(se = F) +
-  facet_wrap(~ parent) +
-  scale_y_continuous(limits = c(7.5, 10)) + scale_x_continuous(limits = c(30, 35))
-
-# plot frequency of joy over years before and since first child
-tab_family %>% 
-  mutate(depvar_freqjoy = ifelse(depvar_freqjoy < 0, NA, depvar_freqjoy)) %>% 
-  group_by(years_since_first_child, sex_fct) %>% 
-  summarise(
-    n = n(), 
-    mean_freqjoy = mean(depvar_freqjoy, na.rm = T), 
-    n_non_missing_freqjoy = sum(!is.na(depvar_freqjoy))) %>% 
-  ggplot(aes(x = years_since_first_child, y = mean_freqjoy, color = sex_fct)) + 
-  geom_vline(xintercept = 0, linewidth = 0.5) + 
-  geom_point() + 
-  geom_smooth(se = F) +
-  scale_y_continuous(limits = c(6, 8)) + 
-  scale_x_continuous(limits = c(-10, 10)) 
-
-# plot frequency of anger over years before and since first child
-tab_family %>% 
-  mutate(depvar_freqanger = ifelse(depvar_freqanger < 0, NA, depvar_freqanger)) %>% 
-  group_by(years_since_first_child, sex_fct) %>% 
-  summarise(
-    n = n(), 
-    mean_freqanger = mean(depvar_freqanger, na.rm = T), 
-    n_non_missing_freqanger = sum(!is.na(depvar_freqanger))) %>% 
-  ggplot(aes(x = years_since_first_child, y = mean_freqanger, color = sex_fct)) + 
-  geom_vline(xintercept = 0, linewidth = 0.5) + 
-  geom_point() + 
-  geom_smooth(se = F) +
-  scale_y_continuous(limits = c(2, 6)) + 
-  scale_x_continuous(limits = c(-10, 10))   
-
-# plot frequency of sadness over years before and since first child
-tab_family %>% 
-  mutate(depvar_freqsad = ifelse(depvar_freqsad < 0, NA, depvar_freqsad)) %>% 
-  group_by(years_since_first_child, sex_fct) %>% 
-  summarise(
-    n = n(), 
-    mean_freqsad = mean(depvar_freqsad, na.rm = T), 
-    n_non_missing_freqsad = sum(!is.na(depvar_freqsad))) %>% 
-  ggplot(aes(x = years_since_first_child, y = mean_freqsad, color = sex_fct)) + 
-  geom_vline(xintercept = 0, linewidth = 0.5) + 
-  geom_point() + 
-  geom_smooth(se = F) +
-  scale_y_continuous(limits = c(1, 4)) + 
-  scale_x_continuous(limits = c(-10, 10))  
-
-# plot frequency of worry over years before and since first child
-tab_family %>% 
-  mutate(depvar_freqworry = ifelse(depvar_freqworry < 0, NA, depvar_freqworry)) %>% 
-  group_by(years_since_first_child, sex_fct) %>% 
-  summarise(
-    n = n(), 
-    mean_freqworry = mean(depvar_freqworry, na.rm = T), 
-    n_non_missing_freqworry = sum(!is.na(depvar_freqworry))) %>% 
-  ggplot(aes(x = years_since_first_child, y = mean_freqworry, color = sex_fct)) + 
-  geom_vline(xintercept = 0, linewidth = 0.5) + 
-  geom_point() + 
-  geom_smooth(se = F) +
-  scale_y_continuous(limits = c(1.5, 4)) + 
-  scale_x_continuous(limits = c(-10, 10))
 
