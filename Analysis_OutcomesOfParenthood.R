@@ -1,6 +1,7 @@
 # Project Name: Outcomes of Parenthood
 # Author: Bruno Alves de Carvalho
 # Status: ongoing
+# Note: split data processing and data analysis into 2 separate scripts
 
 
 # Set up ------------------------------------------------------------------
@@ -8,10 +9,16 @@
 # Set the directory
 setwd("/Users/brunoalvesdecarvalho/Desktop/DataWarehouse_20231015_ve01")
 
-# Loading packages
+# Loading packages for data processing
 library(tidyverse)
 library(memoise)
 library(haven)
+
+# Loading packages for data analysis
+library(tidyverse)
+library(tidymodels)
+library(rsample)
+library(workflowsets)
 
 # Load functions
 source("R_Scripts/FunctionRepository_20231016_ve01.R")
@@ -237,30 +244,30 @@ tab_family <-
     by = "idpers", relationship = "one-to-many") %>% 
   mutate(ownkid_new = ifelse(ownkid < 0, NA, ownkid)) %>% 
   # Group by individual ids
-  group_by(idpers) %>% 
+  group_by(idpers) %>%
   # Push the last number of kids forward if value is missing
   fill(ownkid_new, .direction = "down") %>% 
-  ungroup() %>% 
   # Filter for the remaining missing values in number of children
   filter(!is.na(ownkid_new)) %>% 
   # Flag moment when the individual has their first child
-  group_by(idpers) %>% 
   mutate(
     row_id = row_number(),
     cumsum = cumsum(ownkid_new), 
     first_child = ifelse(cumsum == 1 & nbb == 1, 1, 0),
     # Flag period when the individual is a parent
-    parenthood = ifelse(cumsum > 0, 1, 0) %>% factor(levels = c(0,1), labels = c("no_children", "has_children")),
+    parenthood = ifelse(cumsum >= 1, 1, 0) %>% factor(levels = c(0,1), labels = c("no_children", "has_children")),
     # Identify year of first child
     year_of_first_child = ifelse(first_child == 1, year, NA)
   ) %>% 
   fill(year_of_first_child, .direction = "updown") %>% 
   # Identify number of years since and before first child
   mutate(years_since_first_child = year - year_of_first_child) %>% 
-  ungroup() %>% 
+  ungroup()
+tab_family <-
+  tab_family %>% 
   # Identify if the individual is a parent or non-parent
   left_join(
-    tab_family %>% group_by(idpers) %>% summarise(sum_nbkids = sum(ifelse(ownkid < 0, 0, ownkid), na.rm = T)), relationship = "many-to-one") %>% 
+    tab_family %>% group_by(idpers) %>% summarise(sum_nbkids = sum(ifelse(ownkid_new < 0, 0, ownkid), na.rm = T)), relationship = "many-to-one") %>% 
   mutate(parent = ifelse(sum_nbkids > 0, "parent", "non_parent")) %>% 
   select(
     -starts_with("nb"),
@@ -284,17 +291,7 @@ tab_family <-
     )
 
 
-# Exploratory Data Analysis -----------------------------------------------
-
-# summary statistics
-arsenal::tableby(
-  ~ partner_support + relatives_support + housework_satisfaction, 
-  data = tab_family, 
-  control = 
-    arsenal::tableby.control(
-      total = T, 
-      numeric.stats = c("Nmiss", "meansd", "range", "medianq1q3"))) %>% 
-  summary()
+# Preliminary Exploratory Data Analysis -----------------------------------
 
 # plot age distribution of parents and non-parents, by sex
 tab_family %>% 
@@ -310,27 +307,25 @@ tab_family %>%
   geom_histogram(aes(x = age)) +
   facet_wrap(~ sex_fct)
 
-# Determine average age and upper-age-limit for having first child
-avg_age_first_child <- 
-  mean(subset(tab_family, first_child == 1)$age) 
-sd_age_first_child <- 
-  sd(subset(tab_family, first_child == 1)$age)
-upper_age_limit <- 
-  avg_age_first_child + (2 * sd_age_first_child)
+# summary statistics of independent variables
+arsenal::tableby(
+  ~ partner_support + relatives_support + housework_satisfaction, 
+  data = tab_family, 
+  control = 
+    arsenal::tableby.control(
+      total = T, 
+      numeric.stats = c("Nmiss", "meansd", "range", "medianq1q3"))) %>% 
+  summary()
 
-# plot life satisfaction over age between parents and non-parents
+
+# Happiness with Partner: Exploratory Data Analysis -----------------------
+
+# plot distribution of happiness with partner
 tab_family %>% 
-  filter(age > 16) %>% 
-  mutate(lifesat_depvar = ifelse(lifesat_depvar < 0, NA, lifesat_depvar)) %>% 
-  group_by(parenthood, age) %>% 
-  summarise(n = n(), mean_lifesat = mean(lifesat_depvar, na.rm = TRUE)) %>% 
-  ggplot(aes(x = age, y = mean_lifesat, color = parenthood)) + 
-  geom_point() + 
-  geom_smooth() + 
-  scale_x_continuous(
-    limits = c(16, 85),
-    breaks = seq(15, 85, by = 5)) + 
-  scale_y_continuous(limits = c(7, 9))
+  group_by(idpers) %>%
+  summarise(mean = mean(hpyprtnr_depvar, na.rm = T)) %>% 
+  ggplot() + 
+  geom_histogram(aes(x = mean))
 
 # plot of happiness with partner over age, by parenthood
 tab_family %>% 
@@ -392,6 +387,91 @@ tab_family %>%
   scale_y_continuous(limits = c(5, 10)) +
   scale_x_continuous(limits = c(25, 80))
 
+# plot happiness with partner over years before and since first child
+tab_family %>% 
+  filter(sex_fct != "other") %>% 
+  mutate(hpyprtnr_depvar = ifelse(hpyprtnr_depvar < 0, NA, hpyprtnr_depvar)) %>% 
+  group_by(years_since_first_child, sex_fct) %>% 
+  summarise(
+    n = n(), 
+    mean_hpyprtnr = mean(hpyprtnr_depvar, na.rm = T), 
+    n_non_missing_hpyprtnr = sum(!is.na(hpyprtnr_depvar))) %>% 
+  ggplot(aes(x = years_since_first_child, y = mean_hpyprtnr, color = sex_fct)) + 
+  geom_vline(xintercept = 0, linewidth = 0.5) + 
+  geom_point() + 
+  geom_smooth(se = F) +
+  scale_y_continuous(limits = c(7.5, 10)) + 
+  scale_x_continuous(limits = c(-5, 9))
+
+
+# Happiness with Partner: Multiple Linear Regression ----------------------
+
+# split the data into 10 folds
+folds <- 
+  vfold_cv(
+    tab_family, 
+    v = 10, 
+    strata = "hpyprtnr_depvar"
+    )
+
+# split training and testing data in each fold
+train_data <- 
+  training(folds$splits[[1]])
+test_data <- 
+  testing(folds$splits[[1]])
+
+# start the model workforce
+lm_wflow <-
+  workflow()
+
+# specify the model engine
+lm_model <-
+  linear_reg() %>% 
+  set_engine("lm")
+
+# specify the different models
+model_list <- 
+  list(
+    null = hpyprtnr_depvar ~ 0
+  )
+
+# store the model engine and the list of models inside the workflow
+model_storage <- 
+  workflow_set(
+    preproc = model_list, 
+    models = list(lm = lm_model)
+    )
+
+# fit the model
+
+
+# save model results
+
+
+# display model results
+
+
+# Happiness with Partner: Finite Distributed Lag Model --------------------
+
+# status: not started
+
+
+# Life Satisfaction: Exploratory Data Analysis ----------------------------
+
+# plot life satisfaction over age between parents and non-parents
+tab_family %>% 
+  filter(age > 16) %>% 
+  mutate(lifesat_depvar = ifelse(lifesat_depvar < 0, NA, lifesat_depvar)) %>% 
+  group_by(parenthood, age) %>% 
+  summarise(n = n(), mean_lifesat = mean(lifesat_depvar, na.rm = TRUE)) %>% 
+  ggplot(aes(x = age, y = mean_lifesat, color = parenthood)) + 
+  geom_point() + 
+  geom_smooth() + 
+  scale_x_continuous(
+    limits = c(16, 85),
+    breaks = seq(15, 85, by = 5)) + 
+  scale_y_continuous(limits = c(7, 9))
+
 # plot life satisfaction over years before and since first child
 tab_family %>% 
   mutate(lifesat_depvar = ifelse(lifesat_depvar < 0, NA, lifesat_depvar)) %>% 
@@ -408,21 +488,15 @@ tab_family %>%
   scale_y_continuous(limits = c(7, 9)) + 
   scale_x_continuous(limits = c(-9, 9)) 
 
-# plot happiness with partner over years before and since first child
-tab_family %>% 
-  filter(sex_fct != "other") %>% 
-  mutate(hpyprtnr_depvar = ifelse(hpyprtnr_depvar < 0, NA, hpyprtnr_depvar)) %>% 
-  group_by(years_since_first_child, sex_fct) %>% 
-  summarise(
-    n = n(), 
-    mean_hpyprtnr = mean(hpyprtnr_depvar, na.rm = T), 
-    n_non_missing_hpyprtnr = sum(!is.na(hpyprtnr_depvar))) %>% 
-  ggplot(aes(x = years_since_first_child, y = mean_hpyprtnr, color = sex_fct)) + 
-  geom_vline(xintercept = 0, linewidth = 0.5) + 
-  geom_point() + 
-  geom_smooth(se = F) +
-  scale_y_continuous(limits = c(7.5, 10)) + 
-  scale_x_continuous(limits = c(-5, 9))  
+
+# Life Satisfaction: Multiple Linear Regression ---------------------------
+
+# status: not started
+
+
+# Life Satisfaction: Finite Distributed Lag Model -------------------------
+
+# status: not started
 
 
 # Archive -----------------------------------------------------------------
