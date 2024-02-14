@@ -407,18 +407,18 @@ tab_family %>%
 # Happiness with Partner: Multiple Linear Regression ----------------------
 
 # split the data into 10 folds
-folds <- 
-  vfold_cv(
-    tab_family, 
-    v = 10, 
-    strata = "hpyprtnr_depvar"
+tab_family_split <- 
+  initial_split(
+    tab_family,
+    prop = 0.80,
+    strata = hpyprtnr_depvar
     )
 
 # split training and testing data in each fold
 train_data <- 
-  training(folds$splits[[1]])
+  training(tab_family_split)
 test_data <- 
-  testing(folds$splits[[1]])
+  testing(tab_family_split)
 
 # start the model workforce
 lm_wflow <-
@@ -430,9 +430,12 @@ lm_model <-
   set_engine("lm")
 
 # specify the different models
+lm_null <-
+  recipe(hpyprtnr_depvar ~ 1, data = train_data)
+
 model_list <- 
   list(
-    null = hpyprtnr_depvar ~ 0
+    null = lm_null
   )
 
 # store the model engine and the list of models inside the workflow
@@ -443,12 +446,22 @@ model_storage <-
     )
 
 # fit the model
-
+model_fits <- 
+  model_storage %>% 
+  mutate(
+    fit = map(info, ~ fit(.x$workflow[[1]], data = train_data))
+    )
 
 # save model results
-
+model_res <-
+  model_fits$fit %>% 
+  pluck(1) %>% 
+  extract_fit_engine() %>% # relevant when using fit() rather than lm()
+  summary()
 
 # display model results
+tidy(model_fits$fit %>% pluck(1))
+tidy(model_res)
 
 
 # Happiness with Partner: Finite Distributed Lag Model --------------------
