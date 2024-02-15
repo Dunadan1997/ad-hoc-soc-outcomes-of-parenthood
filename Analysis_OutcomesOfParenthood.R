@@ -432,10 +432,42 @@ lm_model <-
 # specify the different models
 lm_null <-
   recipe(hpyprtnr_depvar ~ 1, data = train_data)
+biv_model <-
+  recipe(hpyprtnr_depvar ~ parenthood, data = train_data)
+multiv_model_01 <-
+  recipe(hpyprtnr_depvar ~ parenthood + age, data = train_data) %>% 
+  step_poly(age, degree = 2)
+multiv_model_02 <-
+  recipe(hpyprtnr_depvar ~ parenthood + age, data = train_data) %>% 
+  step_poly(age, degree = 2) %>% 
+  step_interact(~starts_with("age_"):starts_with("parenthood"))
+multiv_model_03 <-
+  recipe(hpyprtnr_depvar ~ parenthood + age + sleep_problems, data = train_data) %>% 
+  step_poly(age, degree = 2) %>% 
+  step_interact(~starts_with("age_"):starts_with("parenthood"))
+multiv_model_04 <-
+  recipe(hpyprtnr_depvar ~ parenthood + age + sleep_problems + housework_satisfaction, data = train_data) %>% 
+  step_poly(age, degree = 2) %>% 
+  step_interact(~starts_with("age_"):starts_with("parenthood"))
+multiv_model_05 <-
+  recipe(hpyprtnr_depvar ~ parenthood + age + sleep_problems + housework_satisfaction + relatives_support, data = train_data) %>% 
+  step_poly(age, degree = 2) %>% 
+  step_interact(~starts_with("age_"):starts_with("parenthood"))
+multiv_model_06 <-
+  recipe(hpyprtnr_depvar ~ parenthood + age + sleep_problems + housework_satisfaction + relatives_support + marriage + separation + sex_fct + edyear + income_level + ownkid_new + idpers + idhous, data = train_data) %>% 
+  step_poly(age, degree = 2) %>% 
+  step_interact(~starts_with("age_"):starts_with("parenthood"))
 
 model_list <- 
   list(
-    null = lm_null
+    null = lm_null,
+    bivariate = biv_model,
+    multivariate_01 = multiv_model_01,
+    multiv_model_02 = multiv_model_02,
+    multiv_model_03 = multiv_model_03,
+    multiv_model_04 = multiv_model_04,
+    multiv_model_05 = multiv_model_05,
+    multiv_model_06 = multiv_model_06
   )
 
 # store the model engine and the list of models inside the workflow
@@ -449,7 +481,7 @@ model_storage <-
 model_fits <- 
   model_storage %>% 
   mutate(
-    fit = map(info, ~ fit(.x$workflow[[1]], data = train_data))
+    fit = map(info, ~ fit(.x$workflow[[1]], data = train_data)) # figure out how to predict from workflow sets!!
     )
 
 # save model results
