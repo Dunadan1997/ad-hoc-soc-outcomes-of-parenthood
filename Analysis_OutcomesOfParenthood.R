@@ -9,12 +9,12 @@
 # Set the directory
 setwd("/Users/brunoalvesdecarvalho/Desktop/DataWarehouse_20231015_ve01")
 
-# Loading packages for data processing
+# Load packages for data processing
 library(tidyverse)
 library(memoise)
 library(haven)
 
-# Loading packages for data analysis
+# Load packages for data analysis
 library(tidyverse)
 library(tidymodels)
 library(rsample)
@@ -405,6 +405,8 @@ tab_family %>%
 
 
 # Happiness with Partner: Multiple Linear Regression ----------------------
+
+##### imputate missing values in independent variables!
 
 # split the data into 10 folds
 tab_family_split <- 
